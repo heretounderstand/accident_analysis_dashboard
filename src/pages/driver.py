@@ -143,7 +143,7 @@ def render_driver_page():
             st.metric(
                 "Alcoolémie moyenne",
                 f"{pct_alcohol:.1f}",
-                help="Alcoolémie moyenne des conducteurs (0-4)"
+                help="Alcoolémie moyenne des conducteurs (0 - 0.5)"
             )
         
         with cols[3]:
