@@ -43,6 +43,7 @@ _template.layout = go.Layout(
     paper_bgcolor=SURFACE,
     plot_bgcolor=SURFACE,
     colorway=SERIES,
+    separators=", ",  # virgule décimale, espace pour les milliers
     height=CHART_HEIGHT,
     margin=dict(l=8, r=16, t=16, b=8),
     hoverlabel=dict(bgcolor="white", bordercolor=AXIS, font=dict(family=FONT, size=12, color=INK)),
@@ -183,27 +184,35 @@ def line_chart(
     yaxis = dict(title=y_label, tickformat=tick)
     if y_from_zero:
         yaxis["rangemode"] = "tozero"
-    fig.update_layout(yaxis=yaxis, xaxis=dict(title=None), hovermode="x unified")
-    if height:
-        fig.update_layout(height=height)
+    else:
+        # Fenêtre d'au moins ±15 % autour de la moyenne : assez serrée pour lire la courbe,
+        # assez large pour ne pas transformer du bruit en tendance spectaculaire.
+        values = data[[y] + (list(band) if band else [])].to_numpy(dtype=float)
+        center = float(np.nanmean(data[y]))
+        lo = min(np.nanmin(values), center * 0.85)
+        hi = max(np.nanmax(values), center * 1.15)
+        pad = (hi - lo) * 0.05
+        yaxis["range"] = [lo - pad, hi + pad]
+    fig.update_layout(yaxis=yaxis, xaxis=dict(title=None), hovermode="x unified",
+                      height=height or 300)
     return fig
 
 
 def decomposition_chart(index: pd.DatetimeIndex, observed, trend, seasonal, resid) -> go.Figure:
     """Décomposition STL en petits multiples (un axe par composante, pas de double axe)."""
     fig = make_subplots(
-        rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.06,
-        subplot_titles=("Série observée", "Tendance", "Saisonnalité", "Résidus"),
+        rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.05,
     )
+    titles = ("Observé", "Tendance", "Saisonnalité", "Résidus")
     parts = [(observed, BLUE), (trend, BLUE), (seasonal, BLUE), (resid, MUTED)]
     for i, (series, color) in enumerate(parts, start=1):
         fig.add_trace(go.Scatter(
             x=index, y=series, mode="lines", line=dict(color=color, width=1.6 if i != 2 else 2),
             showlegend=False, hovertemplate="%{x|%b %Y} : %{y:,.1f}<extra></extra>",
         ), row=i, col=1)
-    fig.update_layout(height=640, margin=dict(t=36))
-    fig.update_annotations(font=dict(size=12, color=INK_2), x=0, xanchor="left")
-    fig.update_yaxes(gridcolor=GRID)
+        fig.update_yaxes(title_text=titles[i - 1], row=i, col=1)
+    fig.update_layout(height=620, margin=dict(t=12))
+    fig.update_yaxes(gridcolor=GRID, nticks=4, title_font=dict(size=12, color=INK_2))
     return fig
 
 
@@ -290,10 +299,18 @@ def choropleth(data: pd.DataFrame, iso_col: str, value: str, name_col: str,
 def effect_size_chart(ranking: pd.DataFrame, labels: dict[str, str]) -> go.Figure:
     d = ranking.iloc[::-1].copy()
     d["label"] = d["factor"].map(lambda f: labels.get(f, f))
-    colors = [BLUE if s else AXIS for s in d["significant"]]
+    colors = [BLUE if s else MUTED for s in d["significant"]]
     effect_name = d["effect_name"].iloc[0] if not d.empty else ""
-    fig = go.Figure(go.Bar(
-        y=d["label"], x=d["effect"], orientation="h", marker=dict(color=colors, cornerradius=4),
+    fig = go.Figure()
+    # Tiges fines + points : un effet quasi nul reste visible (un point sur l'axe) au lieu
+    # d'une barre invisible qui donne l'impression d'un graphique vide.
+    for label, effect, color in zip(d["label"], d["effect"], colors):
+        fig.add_trace(go.Scatter(x=[0, effect], y=[label, label], mode="lines",
+                                 line=dict(color=color, width=2), hoverinfo="skip",
+                                 showlegend=False))
+    fig.add_trace(go.Scatter(
+        y=d["label"], x=d["effect"], mode="markers", showlegend=False,
+        marker=dict(size=10, color=colors, line=dict(color=SURFACE, width=2)),
         customdata=np.stack([d["p_adj"], d["magnitude"]], axis=-1),
         hovertemplate=(
             "<b>%{y}</b><br>" + effect_name + " = %{x:.4f}"
@@ -306,10 +323,11 @@ def effect_size_chart(ranking: pd.DataFrame, labels: dict[str, str]) -> go.Figur
     fig.add_annotation(x=threshold, y=1, yref="paper", yanchor="bottom", showarrow=False,
                        text="seuil d'effet « faible »", font=dict(size=11, color=MUTED))
     fig.update_layout(
-        height=max(300, 26 * len(d) + 90), bargap=0.3,
+        height=max(300, 28 * len(d) + 90),
         xaxis=dict(title=f"Taille d'effet ({effect_name})", showgrid=True, gridcolor=GRID,
-                   range=[0, max(threshold * 1.15, float(d["effect"].max()) * 1.1)]),
-        yaxis=dict(title=None), margin=dict(t=28),
+                   range=[-threshold * 0.05, max(threshold * 1.15, float(d["effect"].max()) * 1.1)],
+                   zeroline=True, zerolinecolor=AXIS, zerolinewidth=1),
+        yaxis=dict(title=None, type="category", showgrid=False), margin=dict(t=28),
     )
     return fig
 

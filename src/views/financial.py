@@ -40,7 +40,7 @@ def render(df: pd.DataFrame, fdf: pd.DataFrame) -> None:
     yearly["low"], yearly["high"] = yearly["mean"] - yearly["ci"], yearly["mean"] + yearly["ci"]
     chart_card(
         "Coût moyen par accident, par année",
-        charts.line_chart(yearly, "Year", "mean", "Coût moyen ($)", fmt=",.0f", band=("low", "high")),
+        charts.line_chart(yearly, "Year", "mean", "Coût moyen ($)", fmt=",.0f", band=("low", "high"), y_from_zero=False),
         subtitle="Bande = intervalle de confiance à 95 %.",
         table=yearly.rename(columns={"Year": "Année", "mean": "Coût moyen", "count": "Accidents"})
         [["Année", "Coût moyen", "Accidents"]].round(0),
