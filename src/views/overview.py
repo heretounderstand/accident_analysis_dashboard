@@ -68,8 +68,8 @@ def render(df: pd.DataFrame, fdf: pd.DataFrame) -> None:
     with left:
         yearly_df = yearly.rename("Accidents").reset_index()
         chart_card(
-            "Nombre d'accidents par année", charts.line_chart(yearly_df, "Year", "Accidents", "Accidents"),
-            subtitle="Axe partant de zéro pour ne pas exagérer les variations.",
+            "Nombre d'accidents par année", charts.line_chart(yearly_df, "Year", "Accidents", "Accidents", y_from_zero=False),
+            subtitle="Échelle d’au moins ±15 % autour de la moyenne pour ne pas exagérer les variations.",
             table=yearly_df.rename(columns={"Year": "Année"}),
         )
     with right:
@@ -77,7 +77,7 @@ def render(df: pd.DataFrame, fdf: pd.DataFrame) -> None:
             fdf["Accident Severity"].cat.categories).fillna(0).rename_axis("Gravité").reset_index(name="Accidents")
         sev["Part"] = sev["Accidents"] / sev["Accidents"].sum()
         fig = charts.bar_chart(sev, "Gravité", "Part", "Part des accidents", fmt=".0%", horizontal=True)
-        fig.update_layout(height=charts.CHART_HEIGHT)
+        fig.update_layout(height=300, bargap=0.45)
         chart_card("Répartition par gravité déclarée", fig, subtitle="Part des accidents de la sélection.",
                    table=sev.assign(Part=sev["Part"].map("{:.1%}".format)))
 

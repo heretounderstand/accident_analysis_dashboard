@@ -50,7 +50,7 @@ def render(df: pd.DataFrame, fdf: pd.DataFrame) -> None:
     chart_card(
         f"{meta['label']} par année",
         charts.line_chart(yearly, "Year", "mean", meta["short"], fmt=meta["fmt"],
-                          band=("low", "high")),
+                          band=("low", "high"), y_from_zero=False),
         subtitle="Bande = intervalle de confiance à 95 %. Une courbe plate dans la bande = pas de tendance.",
         table=yearly.rename(columns={"Year": "Année", "mean": meta["short"], "count": "Accidents"})
         [["Année", meta["short"], "Accidents"]].round(4),
