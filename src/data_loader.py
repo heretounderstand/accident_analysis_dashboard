@@ -1,88 +1,78 @@
-import pandas as pd
-import streamlit as st
+"""Chargement, nettoyage et enrichissement du jeu de données."""
+from __future__ import annotations
+
 from pathlib import Path
 
-@st.cache_data
-def load_data():
-    """
-    Charge et prétraite le dataset des accidents
-    """
-    try:
-        df = pd.read_csv(Path('data/accidents.csv'))
-        
-        # Conversion des types de données
-        numeric_columns = [
-            'Number of Vehicles Involved', 'Number of Injuries',
-            'Number of Fatalities', 'Emergency Response Time',
-            'Driver Alcohol Level', 'Traffic Volume',
-            'Medical Cost', 'Economic Loss'
-        ]
-        
-        for col in numeric_columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # Conversion des dates
-        # Dictionnaire de conversion des mois en anglais vers leurs numéros
-        month_map = {
-            'January': 1, 'February': 2, 'March': 3, 'April': 4,
-            'May': 5, 'June': 6, 'July': 7, 'August': 8,
-            'September': 9, 'October': 10, 'November': 11, 'December': 12
-        }
-        
-        df['Date'] = pd.to_datetime(df['Year'].astype(str) + '-' + df['Month'].map(month_map).astype(str) + '-01')
-        
-        return df
-    
-    except Exception as e:
-        st.error(f"Erreur lors du chargement des données: {str(e)}")
-        return None
+import pandas as pd
+import streamlit as st
 
-def filter_data(df, filters):
-    """
-    Applique les filtres globaux au dataset
-    """
-    if df is None:
-        return None
-    
-    filtered_df = df.copy()
-    
-    # Filtre par sévérité
-    if filters.get('severity'):
-        filtered_df = filtered_df[filtered_df['Accident Severity'].isin(filters['severity'])]
-    
-    # Filtre par nombre de véhicules
-    if filters.get('vehicles_range'):
-        min_v, max_v = filters['vehicles_range']
-        filtered_df = filtered_df[
-            (filtered_df['Number of Vehicles Involved'] >= min_v) &
-            (filtered_df['Number of Vehicles Involved'] <= max_v)
-        ]
-    
-    # Filtre présence piétons/cyclistes
-    if filters.get('pedestrians', False):
-        filtered_df = filtered_df[filtered_df['Pedestrians Involved'] > 0]
-    if filters.get('cyclists', False):
-        filtered_df = filtered_df[filtered_df['Cyclists Involved'] > 0]
-    
-    # Filtre blessés/décès
-    if filters.get('casualties_range'):
-        min_c, max_c = filters['casualties_range']
-        total_casualties = filtered_df['Number of Injuries'] + filtered_df['Number of Fatalities']
-        filtered_df = filtered_df[
-            (total_casualties >= min_c) &
-            (total_casualties <= max_c)
-        ]
-    
-    # Filtre temps de réponse
-    if filters.get('response_time_range'):
-        min_t, max_t = filters['response_time_range']
-        filtered_df = filtered_df[
-            (filtered_df['Emergency Response Time'] >= min_t) &
-            (filtered_df['Emergency Response Time'] <= max_t)
-        ]
-    
-    # Filtre causes d'accident
-    if filters.get('causes'):
-        filtered_df = filtered_df[filtered_df['Accident Cause'].isin(filters['causes'])]
-    
-    return filtered_df
+from .config import (
+    ALCOHOL_BINS, ALCOHOL_LABELS, CATEGORY_ORDERS, COUNTRY_TO_CONTINENT, DATA_PATH,
+    NUMERIC_COLUMNS, QUINTILE_LABELS, SPEED_BINS, SPEED_LABELS, TRANSLATIONS,
+)
+
+MONTH_NUMBER = {name: i for i, name in enumerate(CATEGORY_ORDERS["Month"], start=1)}
+
+
+class DataLoadError(RuntimeError):
+    """Erreur explicite levée quand le fichier source est absent ou invalide."""
+
+
+def _to_category(series: pd.Series, column: str) -> pd.Series:
+    order = CATEGORY_ORDERS.get(column)
+    if order is None:
+        order = sorted(series.dropna().unique())
+    return pd.Categorical(series, categories=order, ordered=column in CATEGORY_ORDERS)
+
+
+def prepare_data(raw: pd.DataFrame) -> pd.DataFrame:
+    """Nettoie et enrichit le DataFrame brut (fonction pure, testable)."""
+    missing = set(NUMERIC_COLUMNS) - set(raw.columns)
+    if missing:
+        raise DataLoadError(f"Colonnes manquantes dans le fichier : {sorted(missing)}")
+
+    df = raw.copy()
+    for col in NUMERIC_COLUMNS:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Traduction des modalités
+    for col, mapping in TRANSLATIONS.items():
+        df[col] = df[col].map(mapping).fillna(df[col])
+
+    # Date (1er du mois : la source ne fournit pas le jour)
+    df["Date"] = pd.to_datetime(
+        dict(year=df["Year"], month=df["Month"].map(MONTH_NUMBER), day=1), errors="coerce"
+    )
+
+    # Variables dérivées
+    df["Continent"] = df["Country"].map(COUNTRY_TO_CONTINENT)
+    df["Victims"] = df["Number of Injuries"] + df["Number of Fatalities"]
+    df["Is Fatal"] = (df["Number of Fatalities"] > 0).astype(float)
+    df["Total Cost"] = df["Medical Cost"] + df["Economic Loss"]
+    df["Fatigue"] = df["Driver Fatigue"].map({1: "Oui", 0: "Non"})
+    df["Alcohol Band"] = pd.cut(
+        df["Driver Alcohol Level"], bins=ALCOHOL_BINS, labels=ALCOHOL_LABELS, right=False
+    )
+    df["Speed Band"] = pd.cut(df["Speed Limit"], bins=SPEED_BINS, labels=SPEED_LABELS)
+    df["Visibility Band"] = pd.qcut(df["Visibility Level"], 5, labels=QUINTILE_LABELS)
+    df["Traffic Band"] = pd.qcut(df["Traffic Volume"], 5, labels=QUINTILE_LABELS)
+    df["Density Band"] = pd.qcut(df["Population Density"], 5, labels=QUINTILE_LABELS)
+
+    categorical = [
+        "Country", "Continent", "Region", "Month", "Day of Week", "Time of Day",
+        "Urban/Rural", "Road Type", "Weather Conditions", "Driver Age Group",
+        "Driver Gender", "Vehicle Condition", "Accident Severity", "Road Condition",
+        "Accident Cause", "Fatigue",
+    ]
+    for col in categorical:
+        df[col] = _to_category(df[col], col)
+
+    return df
+
+
+@st.cache_data(show_spinner="Chargement des données…")
+def load_data(path: Path = DATA_PATH) -> pd.DataFrame:
+    """Charge le CSV source (mis en cache pour toute la session)."""
+    if not Path(path).exists():
+        raise DataLoadError(f"Fichier introuvable : {path}")
+    return prepare_data(pd.read_csv(path))
